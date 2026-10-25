@@ -18,6 +18,8 @@ import { GridEditorModal } from "./ui/gridEditorModal";
 import { NewTableModal } from "./ui/newTableModal";
 import { emptyModel, TableModel } from "./table/model";
 
+import { SidebarToolbar, TOOLBAR_VIEW_TYPE } from "./ui/sidebarToolbar";
+
 const CONFLICT_PLUGIN_IDS = [
   "table-editor-obsidian", // Advanced Tables
   "obsidian-markdown-table-editor",
@@ -32,6 +34,7 @@ function readSettings(data: unknown): Partial<TableMasterSettings> {
   if (!isRecord(data)) return {};
   const settings: Partial<TableMasterSettings> = {};
   if (data.outputFormat === "extended" || data.outputFormat === "html") settings.outputFormat = data.outputFormat;
+  if (data.toolbarPosition === "floating" || data.toolbarPosition === "sidebar") settings.toolbarPosition = data.toolbarPosition;
   if (typeof data.showFloatingToolbar === "boolean") settings.showFloatingToolbar = data.showFloatingToolbar;
   if (
     data.floatingToolbarPosition === "on-click" ||
@@ -51,6 +54,8 @@ function readSettings(data: unknown): Partial<TableMasterSettings> {
 export default class TableMasterPlugin extends Plugin {
   settings: TableMasterSettings = DEFAULT_SETTINGS;
 
+  private lastMarkdownView: MarkdownView | null = null;
+
   onload(): void {
     // Obsidian's `Plugin.onload` signature is declared as `void` even though
     // it accepts a Promise at runtime; declaring this method `async` makes
@@ -66,6 +71,9 @@ export default class TableMasterPlugin extends Plugin {
   private async bootstrap(): Promise<void> {
     await this.loadSettings();
     setLanguage(this.settings.language);
+    this.registerView(TOOLBAR_VIEW_TYPE, (leaf) => new SidebarToolbar(leaf, this));
+    this.lastMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    this.app.workspace.onLayoutReady(() => { void this.syncToolbarPosition(); });
 
     // Reading-view post-processor for merged cells
     this.registerMarkdownPostProcessor(
@@ -139,8 +147,11 @@ export default class TableMasterPlugin extends Plugin {
     // already listening and will re-evaluate its visibility against the new
     // active leaf.
     this.registerEvent(
-      this.app.workspace.on("active-leaf-change", () => {
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        if (leaf?.view instanceof MarkdownView) this.lastMarkdownView = leaf.view;
+        else if (leaf?.view.getViewType() !== TOOLBAR_VIEW_TYPE) this.lastMarkdownView = null;
         this.broadcastSettingsChanged();
+        this.refreshSidebar();
       }),
     );
 
@@ -172,6 +183,36 @@ export default class TableMasterPlugin extends Plugin {
         .querySelectorAll<HTMLElement>('[data-tm-floating-toolbar="1"]')
         .forEach((el) => el.remove());
     });
+  }
+
+  getTargetMarkdownView(): MarkdownView | null {
+    const active = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (active) return active.getMode() === "source" ? active : null;
+    if (this.app.workspace.activeLeaf?.view.getViewType() !== TOOLBAR_VIEW_TYPE) return null;
+    const target = this.lastMarkdownView;
+    let attached = false;
+    this.app.workspace.iterateAllLeaves((leaf) => { if (leaf.view === target) attached = true; });
+    return attached && target?.getMode() === "source" ? target : null;
+  }
+
+  refreshSidebar(): void {
+    this.app.workspace.getLeavesOfType(TOOLBAR_VIEW_TYPE).forEach((leaf) => {
+      if (leaf.view instanceof SidebarToolbar) leaf.view.refresh();
+    });
+  }
+
+  async syncToolbarPosition(): Promise<void> {
+    this.broadcastSettingsChanged();
+    const leaves = this.app.workspace.getLeavesOfType(TOOLBAR_VIEW_TYPE);
+    if (this.settings.toolbarPosition !== "sidebar" || !this.settings.showFloatingToolbar) {
+      leaves.forEach((leaf) => leaf.detach());
+      return;
+    }
+    if (leaves.length) return;
+    const leaf = this.app.workspace.getRightLeaf(false);
+    if (!leaf) return;
+    await leaf.setViewState({ type: TOOLBAR_VIEW_TYPE, active: false });
+    void this.app.workspace.revealLeaf(leaf);
   }
 
   async loadSettings(): Promise<void> {
@@ -245,13 +286,28 @@ export default class TableMasterPlugin extends Plugin {
       callback: () => this.openGridEditor(),
     });
 
+    this.addCommand({
+      id: "open-toolbar-sidebar",
+      name: t("cmd.openToolbar"),
+      callback: async () => {
+        this.settings.toolbarPosition = "sidebar";
+        this.settings.showFloatingToolbar = true;
+        await this.saveSettings();
+        await this.syncToolbarPosition();
+        const leaf = this.app.workspace.getLeavesOfType(TOOLBAR_VIEW_TYPE)[0];
+        if (leaf) void this.app.workspace.revealLeaf(leaf);
+      },
+    });
+
     // Toggle floating toolbar
     this.addCommand({
       id: "toggle-floating-toolbar",
       name: t("cmd.toggleFloating"),
       callback: async () => {
-        this.settings.showFloatingToolbar = !this.settings.showFloatingToolbar;
+        this.settings.showFloatingToolbar = this.settings.toolbarPosition === "sidebar" || !this.settings.showFloatingToolbar;
+        this.settings.toolbarPosition = "floating";
         await this.saveSettings();
+        await this.syncToolbarPosition();
       },
     });
 
