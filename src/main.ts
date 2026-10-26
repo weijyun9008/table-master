@@ -11,7 +11,7 @@ import { serialize } from "./table/serializer";
 import { navigateCell, navigateRowEnter } from "./editor/cellNavigator";
 import { buildFloatingToolbarExt } from "./ui/floatingToolbar";
 import { registerContextMenu } from "./ui/contextMenu";
-import { buildTableWidgetContextMenuExt } from "./ui/tableWidgetMenu";
+import { findActiveWidgetSelection, buildTableWidgetContextMenuExt } from "./ui/tableWidgetMenu";
 import { buildTableMergePostProcessor } from "./render/postProcessor";
 import { buildLivePreviewExt } from "./render/livePreview";
 import { GridEditorModal } from "./ui/gridEditorModal";
@@ -243,6 +243,17 @@ export default class TableMasterPlugin extends Plugin {
     });
   }
 
+  /** Use the same selection semantics for toolbar buttons and commands. */
+  mergeSelectedCells(ctx = getActionContext(this.app, this)): void {
+    if (!ctx) return;
+    const range = findActiveWidgetSelection(this);
+    if (range) {
+      actions.mergeCellRange(ctx, range.r1, range.c1, range.r2, range.c2);
+    } else {
+      actions.mergeSelection(ctx);
+    }
+  }
+
   private registerCommands(): void {
     const editorCmd = (id: string, name: string, fn: (ctx: actions.ActionContext) => void) => {
       this.addCommand({
@@ -269,6 +280,7 @@ export default class TableMasterPlugin extends Plugin {
     editorCmd("align-center", t("cmd.alignCenter"), (c) => actions.alignColumn(c, "center"));
     editorCmd("align-right", t("cmd.alignRight"), (c) => actions.alignColumn(c, "right"));
     editorCmd("align-none", t("cmd.alignNone"), (c) => actions.alignColumn(c, "none"));
+    editorCmd("merge-selection", t("cmd.mergeSelection"), (ctx) => this.mergeSelectedCells(ctx));
     editorCmd("merge-up", t("cmd.mergeUp"), actions.mergeUp);
     editorCmd("merge-down", t("cmd.mergeDown"), actions.mergeDown);
     editorCmd("merge-left", t("cmd.mergeLeft"), actions.mergeLeft);

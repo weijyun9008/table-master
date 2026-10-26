@@ -135,6 +135,7 @@ Every action is exposed as a command and can be bound to a hotkey from **Setting
 | `move-col-left`          | Move column left                  |
 | `move-col-right`         | Move column right                 |
 | `align-left/center/right/none` | Align column                |
+| `merge-selection` | Merge selected cells (Live Preview widget or text selection) |
 | `merge-up`               | Merge with cell above             |
 | `merge-down`             | Merge with cell below             |
 | `merge-left`             | Merge with cell to the left       |

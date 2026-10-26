@@ -7,13 +7,14 @@ vi.mock("obsidian", () => {
     Modal: class {}, MarkdownRenderChild: class {}, Notice: class {} };
 });
 
-import { Editor, EditorTransaction, MarkdownView } from "obsidian";
+import { Command, Editor, EditorTransaction, MarkdownView } from "obsidian";
 import TableMasterPlugin from "../src/main";
 import { TOOLBAR_VIEW_TYPE } from "../src/ui/sidebarToolbar";
 import { DEFAULT_SETTINGS } from "../src/settings";
 import { parseTable } from "../src/table/parser";
 import { serialize } from "../src/table/serializer";
 import { alignColumn } from "../src/editor/actions";
+import * as widgetMenu from "../src/ui/tableWidgetMenu";
 import { getActionContext } from "../src/editor/contextHelper";
 
 describe("sidebar editor targeting and placement", () => {
@@ -38,6 +39,36 @@ describe("sidebar editor targeting and placement", () => {
     });
   });
   const remember = (plugin: TableMasterPlugin, view: MarkdownView) => Object.assign(plugin, { lastMarkdownView: view });
+  it("registers merge selected cells in the command palette", () => {
+    const commands: Command[] = [];
+    Object.assign(plugin, { addCommand: (command: Command) => commands.push(command) });
+    (plugin as unknown as { registerCommands(): void }).registerCommands();
+    const command = commands.find((entry) => entry.id === "merge-selection");
+    expect(command?.name).toBe("Merge selected cells");
+    expect(command?.editorCallback).toBeTypeOf("function");
+  });
+  it.each(["text", "widget"])("merges cells through the registered command using %s selection", (selection) => {
+    const commands: Command[] = [];
+    Object.assign(plugin, { addCommand: (command: Command) => commands.push(command) });
+    (plugin as unknown as { registerCommands(): void }).registerCommands();
+    let text = "| A | B | C |\n| --- | --- | --- |\n| x | y | z |";
+    const editor = {
+      getCursor: (end?: string) => ({ line: 2, ch: end === "to" ? 8 : 2 }),
+      getLine: (line: number) => text.split("\n")[line],
+      lineCount: () => text.split("\n").length,
+      transaction: (change: EditorTransaction) => { text = change.changes![0].text!; },
+    } as unknown as Editor;
+    active = new MarkdownView(null!); Object.assign(active, { editor });
+    const range = vi.spyOn(widgetMenu, "findActiveWidgetSelection").mockReturnValue(
+      selection === "widget" ? { r1: 1, c1: 0, r2: 1, c2: 1 } : undefined,
+    );
+    try {
+      commands.find((entry) => entry.id === "merge-selection")!.editorCallback!(editor, active);
+      expect(parseTable(text).model.rows[1][0].colspan).toBe(2);
+      expect(text).toContain("x");
+      expect(text).toContain("y");
+    } finally { range.mockRestore(); }
+  });
   it("retains the attached editor when keyboard focus enters the sidebar", () => {
     const view = new MarkdownView(null!); attached = [view]; remember(plugin, view);
     expect(plugin.getTargetMarkdownView()).toBe(view);

@@ -3,7 +3,6 @@ import { Icons } from "./icons";
 import { t } from "../i18n";
 import * as actions from "../editor/actions";
 import { getActionContext } from "../editor/contextHelper";
-import { findActiveWidgetSelection } from "./tableWidgetMenu";
 
 interface ToolbarItem {
   icon: string;
@@ -49,19 +48,7 @@ export function renderToolbar(content: HTMLElement, plugin: TableMasterPlugin): 
       {
         icon: Icons.mergeSelection,
         tip: t("tip.mergeSelection"),
-        // Prefer Obsidian's table-widget visual selection (Live Preview)
-        // when present, falling back to the editor's text selection.
-        // The widget's selection isn't reflected in the editor's text
-        // range, so calling actions.mergeSelection blindly would emit
-        // "selection is not a valid rectangle" inside the widget.
-        run: () => {
-          const range = findActiveWidgetSelection(plugin);
-          if (range) {
-            act((c) => actions.mergeCellRange(c, range.r1, range.c1, range.r2, range.c2));
-            return;
-          }
-          act(actions.mergeSelection);
-        },
+        run: () => plugin.mergeSelectedCells(),
       },
       { icon: Icons.mergeUp, tip: t("tip.mergeUp"), run: () => act(actions.mergeUp) },
       { icon: Icons.mergeDown, tip: t("tip.mergeDown"), run: () => act(actions.mergeDown) },
